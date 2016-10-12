@@ -5,7 +5,7 @@ import sys
 reload(sys)
 sys.setdefaultencoding('utf-8')
 import scrapy
-
+import urlparse
 from scrapy import Request
 from scrapy.loader import ItemLoader
 from scrapy.loader.processors import TakeFirst,MapCompose,Join
@@ -17,15 +17,17 @@ class LawxpSpider(scrapy.Spider):
     #allowed_domains = ["lawxp.com"]
     login_url = 'http://www.lawxp.com/wl/Login.aspx'
     case_url = 'http://www.lawxp.com/Case/'
-    username = 'ffmo'
-    password = 'zhu123456'
+    sear_url = ''
+    username = ''
+    password = ''
 
 
     def start_requests(self):
         """启动登陆"""
         yield Request(url=self.login_url,
                       callback=self.login,
-                      meta={'cookiejar':1},
+                      meta={'cookiejar':1,
+                            'dont_cache':True},
                       dont_filter=True)
 
     def login(self,response):
@@ -59,41 +61,35 @@ class LawxpSpider(scrapy.Spider):
         yield FormRequest.from_response(response,
                                         formdata=formdata,
                                         callback=self.afterlogin,
-                                        meta={'cookiejar':response.meta['cookiejar']})
+                                        meta={'cookiejar':response.meta['cookiejar'],
+                                              'dont_cache':True})
 
     def afterlogin(self,response):
         """检测是否登陆成功"""
-        #print response.body
-        yield Request(url=self.case_url,
-                      callback=self.checklogin,
-                      meta={'cookiejar':response.meta['cookiejar']},
+        search_url = 'http://www.lawxp.com/case/?RegionId=141&q=%25e8%25af%2588%25e9%25aa%2597&WriteType=-1'
+        yield Request(url=search_url,
+                      callback=self.parse,
+                      meta={'cookiejar':response.meta['cookiejar'],
+                            'dont_cache':True},
                       dont_filter=True)
-
-    def checklogin(self,response):
-        """检测是否登陆成功"""
-        print response.body
 
 
     def parse(self, response):
 
         link_list = response.xpath('//div[@class="gjso-list-qbt"]/span[1]/a/@href').extract()
-        #code_publish = response.xpath('//span[@class="zyin-ll-bt2"]')
+
         for link in link_list:
             url = 'http://www.lawxp.com'+link
-            yield Request(url=url,callback=self.parseDetail)
+            yield Request(url=url,callback=self.parseDetail,meta={'cookiejar':response.meta['cookiejar']})
         # 获取下一页信息
         link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
         if link_next:
-            pg = re.search(re.compile('(?<=pg=)\d{1,}'), response.url).group(0)
-            url_next = 'http://www.lawxp.com/Case/?pg=%s&WriteType=-1'%(int(pg)+1)
-            '''
-            # 判断是否循环链接
-            if url_next == response.url:
-                print '遇到循环链接,准备页码手动自增1'
-                pg = re.search(re.compile('(?<=pg=)\d{1,}'),url_next).group(0)
-                url_next = 'http://www.lawxp.com/Case/?pg=%s&WriteType=-1'%(int(pg)+1)
-                '''
-            yield Request(url=url_next,callback=self.parse)
+            url_next = 'http://www.lawxp.com/case/'+link_next
+            print '准备采集下一页：----------------%s--------------------'%(url_next)
+            yield Request(url=url_next,
+                          callback=self.parse,
+                          meta={'cookiejar':response.meta['cookiejar']}
+                          )
         else:
             print '获取下一页失败！'
 
