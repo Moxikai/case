@@ -18,7 +18,7 @@ class LawxpSpider(scrapy.Spider):
     #allowed_domains = ["lawxp.com"]
     login_url = 'http://www.lawxp.com/wl/Login.aspx'
     case_url = 'http://www.lawxp.com/Case/'
-    sear_url = ''
+    server = 'http://127.0.0.1:8080/document/update'
 
     def start_requests(self):
         """请求入口"""
@@ -38,62 +38,47 @@ class LawxpSpider(scrapy.Spider):
             link = a.xpath('@href').extract_first()
             quantity = a.xpath('@title').re('\d{1,}')[0]
             area_name = a.xpath('text()').extract_first()
-            region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
             url = 'http://www.lawxp.com/case/'+link
-            data = {'region_id':region_id,
-                    'area_name':area_name,
-                    'url':url,
-                    'quantity':int(quantity),
+            data = {
+                    'area_first':area_name,
                     }
+            # 为了获取完整区域数据，全部分解到城市
+            print '一级区域-------------%s--------------搜索结果：%s个,继续按照城市分解'%(area_name,quantity)
+            yield Request(url=url,
+                          meta={'data':data},
+                          callback=self.parseProvinceLevel)
 
-            if data['quantity'] > 400:
-                print '一级区域-------------%s--------------搜索结果大于400,继续按照城市分解'%(area_name)
-                yield Request(url=data['url'],
-                              callback=self.parseProvinceLevel)
-            else:
-                print '一级区域-------------%s---------------搜索结果不大于400,准备直接采集'%(area_name)
-                yield Request(url=data['url'],
-                              callback=self.parse)
 
     def parseProvinceLevel(self,response):
         """解析一级行政区域数据"""
+        data = response.meta['data']
         li_list = Selector(response=response).xpath('//div[@id="Group_RegionInfo1__RegionLevel2"]/ul/li')
         for li in li_list:
             link = li.xpath('a/@href').extract_first()
             url = 'http://www.lawxp.com/case/'+ link
             city_name = li.xpath('a/text()').extract_first()
-            region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
             quantity = li.xpath('text()').re('\d{1,}')[0]
-            data = {'region_id':region_id,
-                    'area_name':city_name,
-                    'url':url,
-                    'quantity':int(quantity),
-                    }
-            if data['quantity'] > 400:
-                print '城市区域-----------------%s---------------搜索结果大于400,继续按照法院分解'%(data['area_name'])
-                yield Request(url=url,
-                              callback=self.parseCityLevel)
-            else:
-                print '城市区域------------------%s----------------搜索结果不大于400,准备直接采集'%(data['area_name'])
-                yield Request(url=url,callback=self.parse)
+            data['area_second'] = city_name
+            print '城市区域-----------------%s--------------搜索结果：%s个'%(city_name,quantity)
+            yield Request(url=url,
+                          meta={'data':data},
+                          callback=self.parseCityLevel)
+
 
 
 
     def parseCityLevel(self,response):
         """解析城市级别数据"""
-
-        li_list = Selector(response=response).xpath('//li[@class="xfg-bot13"]')
+        li_list = Selector(response=response).xpath('//div[@class="w-zx-nr-tj xal-bot"]/div/ul/li[@class="xfg-bot13"]')
         for li in li_list:
             link = li.xpath('a/@href').extract_first()
             url = 'http://www.lawxp.com/case/'+link
             quantity = li.xpath('a/@title').re('\d{1,}')[0]
             court_name = li.xpath('a/@title').re('.*(?=\d{1,})')[0]
             print '当前法院------------%s------------搜索结果-------%s个，准备开始采集'%(court_name,quantity)
-            yield Request(url=url,callback=self.parse)
-
-
-
-
+            yield Request(url=url,
+                          meta={'data':response.meta['data']},
+                          callback=self.parse)
 
 
     def parse(self, response):
@@ -102,13 +87,16 @@ class LawxpSpider(scrapy.Spider):
 
         for link in link_list:
             url = 'http://www.lawxp.com'+link
-            yield Request(url=url,callback=self.parseDetail)
+            yield Request(url=url,
+                          meta={'data':response.meta['data']},
+                          callback=self.parseDetail)
         # 获取下一页信息
         link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
         if link_next:
             url_next = 'http://www.lawxp.com/case/'+link_next
             print '准备采集下一页：----------------%s--------------------'%(url_next)
             yield Request(url=url_next,
+                          meta={'data':response.meta['data']},
                           callback=self.parse,
                           )
         else:
@@ -116,19 +104,7 @@ class LawxpSpider(scrapy.Spider):
 
     def parseDetail(self,response):
         """解析详细信息"""
-        """
-
-        l = ItemLoader(item=CaseItem(),response=response)
-        l.add_xpath('title','/html/head/title/text()',TakeFirst,unicode.title) # 标题
-        l.add_xpath('types','//li[@class="mylnr-jj1"][2]/span/a/text()',unicode.title,Join) # 类型，还需转字符串
-        l.add_xpath('court','//li[@class="mylnr-jj1"][3]/span/text()',TakeFirst) # 审理法院
-        l.add_xpath('document_code', '//li[@class="mylnr-jj1"][4]/span[1]/text()', TakeFirst) # 文书字号
-        l.add_xpath('document_type', '//li[@class="mylnr-jj1"][4]/span[2]/text()', TakeFirst) # 文书类型
-        l.add_xpath('conclusion_date','//li[@class="mylnr-jj1"][5]/span[1]/text()',TakeFirst) # 审结日期
-        l.add_xpath('proceeding','//li[@class="mylnr-jj1"][5]/span[2]/text()',TakeFirst) # 审理程序
-        l.add_xpath('judgment','//div[@id="rong_ziId"]',TakeFirst,unicode.title) # 判决书
-        l.load_item()
-        """
+        data = response.meta['data']
         title = response.xpath('/html/head/title/text()').extract_first()
         type_list = response.xpath('//li[@class="mylnr-jj1"][2]/span/a/text()').extract()
         types = ' '.join([str(i) for i in type_list])
@@ -138,7 +114,9 @@ class LawxpSpider(scrapy.Spider):
         conclusion_date = response.xpath('//li[@class="mylnr-jj1"][5]/span[1]/text()').extract_first()
         proceeding = response.xpath('//li[@class="mylnr-jj1"][5]/span[2]/text()').extract_first()
         judgment = response.xpath('//div[@id="rong_ziId"]').extract_first()
-        yield {'url':response.url,
+
+        formdata = {
+            'url':response.url,
             'title':title,
                'types':types,
                'court':court,
@@ -147,8 +125,28 @@ class LawxpSpider(scrapy.Spider):
                'conclusion_date':conclusion_date,
                'proceeding':proceeding,
                'judgment':judgment,
+               'area_first':data['area_first'],
+               'area_second':data['area_second'],
                }
+        # 替换掉None
+        for key in formdata:
+            if formdata[key] is None:
+                formdata[key] = ''
+        yield Request(url=self.server,
+                      meta={'formdata': formdata,
+                            'dont_cache': True},
+                      callback=self.postToServer,
+                      dont_filter=True,
+                      )
 
+    def postToServer(self, response):
+        """提交数据到服务器"""
+        # print response.body
+        csrf_token = response.xpath('//input[@id="csrf_token"]/@value').extract_first()
+        print 'csrf_token:', csrf_token
+        formdata = response.meta['formdata']
+        formdata['csrf_token'] = csrf_token
+        yield FormRequest.from_response(response, formdata=formdata)
 
 
 
