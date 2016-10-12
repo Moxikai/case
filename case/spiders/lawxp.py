@@ -19,151 +19,80 @@ class LawxpSpider(scrapy.Spider):
     login_url = 'http://www.lawxp.com/wl/Login.aspx'
     case_url = 'http://www.lawxp.com/Case/'
     sear_url = ''
-    username = 'feifandata'
-    password = 'ff123456'
-
 
     def start_requests(self):
-        """启动登陆"""
-        yield Request(url=self.login_url,
-                      callback=self.login,
-                      meta={'cookiejar':1,
-                            'dont_cache':True},
-                      dont_filter=True)
+        """请求入口"""
+        url = 'http://www.lawxp.com/Case/?TopicId=20166&WriteType=-1#list' # 金融诈骗
+        yield Request(url=url,
+                      callback=self.getProvinceList,
+                      meta={'dont_cache':True}
+                      ) # 按照省级行政区分级
 
-    def login(self,response):
-        """登陆"""
-        __EVENTTARGET = response.xpath('//input[@id="__EVENTTARGET"]/@value').extract_first()
-        __EVENTARGUMENT = response.xpath('//input[@id="__EVENTARGUMENT"]/@value').extract_first()
-        __VIEWSTATE = response.xpath('//input[@id="__VIEWSTATE"]/@value').extract_first()
-        __VIEWSTATEGENERATOR = response.xpath('//input[@id="__VIEWSTATEGENERATOR"]/@value').extract_first()
-        __EVENTVALIDATION = response.xpath('//input[@id="__EVENTVALIDATION"]/@value').extract_first()
-        lbl_returnUrl = response.xpath('//input[@id="lbl_returnUrl"]/@value').extract_first()
-        ipturl = response.xpath('//input[@id="ipturl"]/@value').extract_first()
-        #nameredio = response.xpath('//input[@id="nameredio"]/@value').extract_first()
+    def getProvinceList(self,response):
+        """获取行政区划列表及搜索结果数量"""
+        total_count = Selector(response=response).xpath('//span[@class="xfg-yxtj4"]/text()').re('\d{1,}')[0]
+        print '当前搜索结果---------------%s个-----------------'%(total_count)
 
-        formdata = {
-            '__EVENTTARGET':__EVENTTARGET,
-            '__EVENTARGUMENT':__EVENTARGUMENT,
-            '__VIEWSTATE':__VIEWSTATE,
-            '__VIEWSTATEGENERATOR':__VIEWSTATEGENERATOR,
-            '__EVENTVALIDATION':__EVENTVALIDATION,
-            'lbl_returnUrl':lbl_returnUrl,
-            'ipturl':ipturl,
-            'nameredio':'0',
-            'username':self.username,
-            'password':self.password,
-            'btnLogin':'登陆',
-            'mobilePhone':'',
-            'dyPwdFirst':'',
-            'coks1':'on'
-        }
-        print formdata
-        yield FormRequest.from_response(response,
-                                        formdata=formdata,
-                                        callback=self.afterlogin,
-                                        meta={'cookiejar':response.meta['cookiejar'],
-                                              'dont_cache':True})
+        a_list = Selector(response=response).xpath('//ul[@id="xfgdq"]/li/a')
+        for a in a_list:
+            link = a.xpath('@href').extract_first()
+            quantity = a.xpath('@title').re('\d{1,}')[0]
+            area_name = a.xpath('text()').extract_first()
+            region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
+            url = 'http://www.lawxp.com/case/'+link
+            data = {'region_id':region_id,
+                    'area_name':area_name,
+                    'url':url,
+                    'quantity':int(quantity),
+                    }
 
-    def afterlogin(self,response):
-        """请求关键字：诈骗，全文搜索"""
-        #search_url = 'http://www.lawxp.com/case/?q=%E8%AF%88%E9%AA%97&t=2'
-        search_url = 'http://www.lawxp.com/Case/'
-        yield Request(url=search_url,
-                      callback=self.parse,
-                      meta={'cookiejar':response.meta['cookiejar'],
-                            'dont_cache':True},
-                      dont_filter=True)
-
-    def parseFirstLevel(self,response):
-        """第一级判断：总数据是否超过400;
-        如果超过400,则获取一级地区链接
-        """
-        result_count = Selector(response=response).xpath('//span[@class="xfg-yxtj4"]/text()').re('\d{1,}')
-        if result_count:
-            count = result_count[0]
-            print '当前搜索条件共有记录：----------------%s个-------------------'%count
-            if int(count) > 400:
-                # 获取一级地区链接，记录数量
-                a_list = Selector(response=response).xpath('//ul[@id="xfgdq"]/li/a')
-                for a in a_list:
-                    if a:
-                        link = a.xpath('@href').extract_first()
-                        area_name = a.xpath('text()').extract_first()
-                        quantity = a.xpath('@title').re('\d{1,}')[0]
-                        region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
-                        url = 'http://www.lawxp.com/case/'+link
-                        data = {
-                            'region_id':region_id,
-                            'area_name':area_name,
-                            'url':url,
-                            'quantity':int(quantity)
-                        }
-                        yield Request(url=data['url'],
-                                      meta={
-                                          'data':data,
-                                          'cookiejar':response.meta['cookiejar']},
-                                      callback=self.parseSecondLevel
-                                      )
+            if data['quantity'] > 400:
+                print '一级区域-------------%s--------------搜索结果大于400,继续按照城市分解'%(area_name)
+                yield Request(url=data['url'],
+                              callback=self.parseProvinceLevel)
             else:
-                print '当前搜索结果小于400,准备直接开始采集！'
-                yield self.parse(response)
+                print '一级区域-------------%s---------------搜索结果不大于400,准备直接采集'%(area_name)
+                yield Request(url=data['url'],
+                              callback=self.parse)
+
+    def parseProvinceLevel(self,response):
+        """解析一级行政区域数据"""
+        li_list = Selector(response=response).xpath('//div[@id="Group_RegionInfo1__RegionLevel2"]/ul/li')
+        for li in li_list:
+            link = li.xpath('a/@href').extract_first()
+            url = 'http://www.lawxp.com/case/'+ link
+            city_name = li.xpath('a/text()').extract_first()
+            region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
+            quantity = li.xpath('text()').re('\d{1,}')[0]
+            data = {'region_id':region_id,
+                    'area_name':city_name,
+                    'url':url,
+                    'quantity':int(quantity),
+                    }
+            if data['quantity'] > 400:
+                print '城市区域-----------------%s---------------搜索结果大于400,继续按照法院分解'%(data['area_name'])
+                yield Request(url=url,
+                              callback=self.parseCityLevel)
+            else:
+                print '城市区域------------------%s----------------搜索结果不大于400,准备直接采集'%(data['area_name'])
+                yield Request(url=url,callback=self.parse)
 
 
-    def parseSecondLevel(self,response):
-        """解析一级地区"""
-        data = response.meta['data']
-        if data['quantity'] > 400:
-            pass
-            # 获取二级地区链接
-            li_list = Selector(response=response).xpath('//div[@id="Group_RegionInfo1__RegionLevel2"]/ul/li')
-            for li in li_list:
-                if li:
-                    link = li.xpath('a/@href').extract_first()
-                    url = 'http://www.lawxp.com/case/'+link
-                    second_area_name = li.xpath('a/text()').extract_first()
-                    quantity = li.xpath('text()').re('\d{1,}')[0]
-                    # 二级地区id
-                    region_id = re.search(re.compile('(?<=RegionId=)\d{1,}'),link).group(0)
-                    second_data = {'region_id':region_id,
-                                   'second_area_name':second_area_name,
-                                   'url':url,
-                                   'quantity':int(quantity),
-                                   }
-                    # 转到二级地区链接
-                    yield Request(url=second_data['url'],
-                                  callback=self.parseThirdLevel,
-                                  meta={'cookiejar':response.meta['cookiejar'],
-                                        'second_data':second_data})
-        else:
-            yield self.parse(response)
+
+    def parseCityLevel(self,response):
+        """解析城市级别数据"""
+
+        li_list = Selector(response=response).xpath('//li[@class="xfg-bot13"]')
+        for li in li_list:
+            link = li.xpath('a/@href').extract_first()
+            url = 'http://www.lawxp.com/case/'+link
+            quantity = li.xpath('a/@title').re('\d{1,}')[0]
+            court_name = li.xpath('a/@title').re('.*(?=\d{1,})')[0]
+            print '当前法院------------%s------------搜索结果-------%s个，准备开始采集'%(court_name,quantity)
+            yield Request(url=url,callback=self.parse)
 
 
-    def parseThirdLevel(self,response):
-        """解析二级地区"""
-        second_data = response.meta['second_data']
-        if second_data['quantity'] > 400:
-            # 二级区域结果数量大于400,则分法院链接再分解
-            li_list = Selector(response=response).xpath('//li[@class="xfg-bot13"]')
-            for li in li_list:
-                if li:
-                    link = li.xpath('a/@href').extract_first()
-                    #court_id = re.search(re.compile('(?<=CourtId=)\d{1,}'),link).group(0)
-                    quantity = li.xpath('a/@title').re('\d{1,}')[0]
-                    #court_name = li.xpath('a/@title').re('.*(?=\d{1,})')[0]
-                    url = 'http://www.lawxp.com/case/' + link
-                    third_data = {'url':url,
-                                  'quantity':int(quantity)}
-                    # 暂时不考虑 按照案件类型细分
 
-                    yield Request(url=third_data['url'],
-                                  callback=self.parse,
-                                  meta={'cookiejar':response.meta['cookiejar'],
-                                        'third_data':third_data})
-
-        else:
-            # 二级区域结果数量不大于400，直接开始采集
-            yield self.parse(response)
 
 
 
@@ -173,7 +102,7 @@ class LawxpSpider(scrapy.Spider):
 
         for link in link_list:
             url = 'http://www.lawxp.com'+link
-            yield Request(url=url,callback=self.parseDetail,meta={'cookiejar':response.meta['cookiejar']})
+            yield Request(url=url,callback=self.parseDetail)
         # 获取下一页信息
         link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
         if link_next:
@@ -181,7 +110,6 @@ class LawxpSpider(scrapy.Spider):
             print '准备采集下一页：----------------%s--------------------'%(url_next)
             yield Request(url=url_next,
                           callback=self.parse,
-                          meta={'cookiejar':response.meta['cookiejar']}
                           )
         else:
             print '获取下一页失败！'
