@@ -62,7 +62,8 @@ class LawxpSpider(scrapy.Spider):
         conclusion_date = response.xpath('//li[@class="mylnr-jj1"][5]/span[1]/text()').extract_first()
         proceeding = response.xpath('//li[@class="mylnr-jj1"][5]/span[2]/text()').extract_first()
         judgment = response.xpath('//div[@id="rong_ziId"]').extract_first()
-        yield {'title':title,
+        yield {'url':response.url,
+            'title':title,
                'types':types,
                'court':court,
                'document_code':document_code,
