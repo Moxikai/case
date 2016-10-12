@@ -19,8 +19,8 @@ class LawxpSpider(scrapy.Spider):
     login_url = 'http://www.lawxp.com/wl/Login.aspx'
     case_url = 'http://www.lawxp.com/Case/'
     sear_url = ''
-    username = ''
-    password = ''
+    username = 'feifandata'
+    password = 'ff123456'
 
 
     def start_requests(self):
@@ -67,7 +67,8 @@ class LawxpSpider(scrapy.Spider):
 
     def afterlogin(self,response):
         """请求关键字：诈骗，全文搜索"""
-        search_url = 'http://www.lawxp.com/case/?q=%E8%AF%88%E9%AA%97&t=2'
+        #search_url = 'http://www.lawxp.com/case/?q=%E8%AF%88%E9%AA%97&t=2'
+        search_url = 'http://www.lawxp.com/Case/'
         yield Request(url=search_url,
                       callback=self.parse,
                       meta={'cookiejar':response.meta['cookiejar'],
@@ -154,7 +155,7 @@ class LawxpSpider(scrapy.Spider):
                     third_data = {'url':url,
                                   'quantity':int(quantity)}
                     # 暂时不考虑 按照案件类型细分
-                    
+
                     yield Request(url=third_data['url'],
                                   callback=self.parse,
                                   meta={'cookiejar':response.meta['cookiejar'],
