@@ -9,14 +9,70 @@ import scrapy
 from scrapy import Request
 from scrapy.loader import ItemLoader
 from scrapy.loader.processors import TakeFirst,MapCompose,Join
+from scrapy import FormRequest
 
 from case.items import CaseItem
 class LawxpSpider(scrapy.Spider):
     name = "lawxp"
-    allowed_domains = ["lawxp.com"]
-    start_urls = (
-        'http://www.lawxp.com/case',
-    )
+    #allowed_domains = ["lawxp.com"]
+    login_url = 'http://www.lawxp.com/wl/Login.aspx'
+    case_url = 'http://www.lawxp.com/Case/'
+    username = 'ffmo'
+    password = 'zhu123456'
+
+
+    def start_requests(self):
+        """启动登陆"""
+        yield Request(url=self.login_url,
+                      callback=self.login,
+                      meta={'cookiejar':1},
+                      dont_filter=True)
+
+    def login(self,response):
+        """登陆"""
+        __EVENTTARGET = response.xpath('//input[@id="__EVENTTARGET"]/@value').extract_first()
+        __EVENTARGUMENT = response.xpath('//input[@id="__EVENTARGUMENT"]/@value').extract_first()
+        __VIEWSTATE = response.xpath('//input[@id="__VIEWSTATE"]/@value').extract_first()
+        __VIEWSTATEGENERATOR = response.xpath('//input[@id="__VIEWSTATEGENERATOR"]/@value').extract_first()
+        __EVENTVALIDATION = response.xpath('//input[@id="__EVENTVALIDATION"]/@value').extract_first()
+        lbl_returnUrl = response.xpath('//input[@id="lbl_returnUrl"]/@value').extract_first()
+        ipturl = response.xpath('//input[@id="ipturl"]/@value').extract_first()
+        #nameredio = response.xpath('//input[@id="nameredio"]/@value').extract_first()
+
+        formdata = {
+            '__EVENTTARGET':__EVENTTARGET,
+            '__EVENTARGUMENT':__EVENTARGUMENT,
+            '__VIEWSTATE':__VIEWSTATE,
+            '__VIEWSTATEGENERATOR':__VIEWSTATEGENERATOR,
+            '__EVENTVALIDATION':__EVENTVALIDATION,
+            'lbl_returnUrl':lbl_returnUrl,
+            'ipturl':ipturl,
+            'nameredio':'0',
+            'username':self.username,
+            'password':self.password,
+            'btnLogin':'登陆',
+            'mobilePhone':'',
+            'dyPwdFirst':'',
+            'coks1':'on'
+        }
+        print formdata
+        yield FormRequest.from_response(response,
+                                        formdata=formdata,
+                                        callback=self.afterlogin,
+                                        meta={'cookiejar':response.meta['cookiejar']})
+
+    def afterlogin(self,response):
+        """检测是否登陆成功"""
+        #print response.body
+        yield Request(url=self.case_url,
+                      callback=self.checklogin,
+                      meta={'cookiejar':response.meta['cookiejar']},
+                      dont_filter=True)
+
+    def checklogin(self,response):
+        """检测是否登陆成功"""
+        print response.body
+
 
     def parse(self, response):
 
@@ -28,12 +84,15 @@ class LawxpSpider(scrapy.Spider):
         # 获取下一页信息
         link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
         if link_next:
-            url_next = 'http://www.lawxp.com/Case/'+link_next
+            pg = re.search(re.compile('(?<=pg=)\d{1,}'), response.url).group(0)
+            url_next = 'http://www.lawxp.com/Case/?pg=%s&WriteType=-1'%(int(pg)+1)
+            '''
             # 判断是否循环链接
             if url_next == response.url:
                 print '遇到循环链接,准备页码手动自增1'
                 pg = re.search(re.compile('(?<=pg=)\d{1,}'),url_next).group(0)
                 url_next = 'http://www.lawxp.com/Case/?pg=%s&WriteType=-1'%(int(pg)+1)
+                '''
             yield Request(url=url_next,callback=self.parse)
         else:
             print '获取下一页失败！'
