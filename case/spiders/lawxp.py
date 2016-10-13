@@ -114,6 +114,8 @@ class LawxpSpider(scrapy.Spider):
         conclusion_date = response.xpath('//li[@class="mylnr-jj1"][5]/span[1]/text()').extract_first()
         proceeding = response.xpath('//li[@class="mylnr-jj1"][5]/span[2]/text()').extract_first()
         judgment = response.xpath('//div[@id="rong_ziId"]').extract_first()
+        """清理数据"""
+        title = title.repalce('_汇法网（lawxp.com）','') # 去除标题无效数据
 
         formdata = {
             'url':response.url,
