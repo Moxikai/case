@@ -69,6 +69,7 @@ class LawxpSpider(scrapy.Spider):
 
     def parseCityLevel(self,response):
         """解析城市级别数据"""
+        data = response.meta['data']
         li_list = Selector(response=response).xpath('//div[@class="w-zx-nr-tj xal-bot"]/div/ul/li[@class="xfg-bot13"]')
         for li in li_list:
             link = li.xpath('a/@href').extract_first()
@@ -76,8 +77,10 @@ class LawxpSpider(scrapy.Spider):
             quantity = li.xpath('a/@title').re('\d{1,}')[0]
             court_name = li.xpath('a/@title').re('.*(?=\d{1,})')[0]
             print '当前法院------------%s------------搜索结果-------%s个，准备开始采集'%(court_name,quantity)
+            # 法院对应数据量传递过去
+            data['quantity'] = quantity
             yield Request(url=url,
-                          meta={'data':response.meta['data']},
+                          meta={'data':data},
                           callback=self.parse)
 
 
@@ -90,17 +93,27 @@ class LawxpSpider(scrapy.Spider):
             yield Request(url=url,
                           meta={'data':response.meta['data']},
                           callback=self.parseDetail)
+        # 获取每页数据量
+        count_per_page = len(link_list)
+        # 计算最大页码数
+        quantity = response.meta['data']['quantity']
+        max_page = int(quantity)/10 + int(quantity)%10
+        if max_page > 40:
+            print '本次搜索结果超过40页，仍然按照总页码数40页处理'
+            max_page = 40
         # 获取下一页信息
         link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
-        if link_next:
-            url_next = 'http://www.lawxp.com/case/'+link_next
-            print '准备采集下一页：----------------%s--------------------'%(url_next)
+        # 获取显示页码数
+        page = re.search(re.compile('(?<=pg=)\d{1,2}'),link).group(0)
+        if int(page) <= max_page and link_next:
+            url_next = 'http://www.lawxp.com/case/' + link_next
+            print '准备采集第-----------%s页---------------'%(page)
             yield Request(url=url_next,
-                          meta={'data':response.meta['data']},
+                          meta={'data': response.meta['data']},
                           callback=self.parse,
                           )
         else:
-            print '获取下一页失败！'
+            print '已达到页码上限或者完成采集'
 
     def parseDetail(self,response):
         """解析详细信息"""
@@ -115,7 +128,7 @@ class LawxpSpider(scrapy.Spider):
         proceeding = response.xpath('//li[@class="mylnr-jj1"][5]/span[2]/text()').extract_first()
         judgment = response.xpath('//div[@id="rong_ziId"]').extract_first()
         """清理数据"""
-        title = title.repalce('_汇法网（lawxp.com）','') # 去除标题无效数据
+        title = title.replace('_汇法网（lawxp.com）','') # 去除标题无效数据
 
         formdata = {
             'url':response.url,
