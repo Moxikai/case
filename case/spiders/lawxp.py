@@ -4,6 +4,8 @@ import re
 import sys
 reload(sys)
 sys.setdefaultencoding('utf-8')
+import hashlib,os
+
 import scrapy
 import urlparse
 from scrapy import Request
@@ -13,6 +15,12 @@ from scrapy import FormRequest
 from scrapy.selector import Selector
 
 from case.items import CaseItem
+
+def getSignName(string):
+    """获取网址签名"""
+    sha1 = hashlib.sha1()
+    sha1.update(string)
+    return sha1.hexdigest()
 class LawxpSpider(scrapy.Spider):
     name = "lawxp"
     #allowed_domains = ["lawxp.com"]
@@ -79,41 +87,54 @@ class LawxpSpider(scrapy.Spider):
             print '当前法院------------%s------------搜索结果-------%s个，准备开始采集'%(court_name,quantity)
             # 法院对应数据量传递过去
             data['quantity'] = quantity
+            print '在城市级别验证data数据是否存在------------%s-------------'%(data['quantity'])
             yield Request(url=url,
-                          meta={'data':data},
+                          meta={'data': data},
                           callback=self.parse)
 
 
-    def parse(self, response):
+    def parse(self,response):
+        try:
+            data = response.meta['data']
+            link_list = response.xpath('//div[@class="gjso-list-qbt"]/span[1]/a/@href').extract()
+            for link in link_list:
+                url = 'http://www.lawxp.com'+link
+                yield Request(url=url,
+                              meta={'data':data},
+                              callback=self.parseDetail)
+            # 获取每页数据量
+            count_per_page = len(link_list)
+            # 计算最大页码数
+            quantity = data['quantity']
+            max_page = int(quantity)/10 + int(quantity)%10
+            if max_page > 40:
+                print '本次搜索结果超过40页，仍然按照总页码数40页处理'
+                max_page = 40
+            print '本次处理最大页码数-------------------%s-------------------'%(max_page)
+            # 获取下一页信息
+            link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
+            if not link_next:
+                print '已到最后页面'
+            else:
+                # 获取显示页码数
+                page = re.search(re.compile('(?<=pg=)\d{1,2}'),link_next).group(0)
+                if int(page) <= max_page:
+                    url_next = 'http://www.lawxp.com/case/' + link_next
+                    print '准备采集第-----------%s页---------------'%(page)
+                    yield Request(url=url_next,
+                                  meta={'data':data},
+                                  callback=self.parse,
+                                  )
+                else:
+                    print '已达到页码上限或者完成采集'
+        except KeyError:
+            print '解析遇到问题，准备保存网页源码'
+            path =os.path.join('/home/moxi/PycharmProjects/case/error',getSignName(response.url)+'.html')
+            with open(path,'w') as f:
+                f.write(response.body)
+            print '网页源码已保存完毕！'
 
-        link_list = response.xpath('//div[@class="gjso-list-qbt"]/span[1]/a/@href').extract()
 
-        for link in link_list:
-            url = 'http://www.lawxp.com'+link
-            yield Request(url=url,
-                          meta={'data':response.meta['data']},
-                          callback=self.parseDetail)
-        # 获取每页数据量
-        count_per_page = len(link_list)
-        # 计算最大页码数
-        quantity = response.meta['data']['quantity']
-        max_page = int(quantity)/10 + int(quantity)%10
-        if max_page > 40:
-            print '本次搜索结果超过40页，仍然按照总页码数40页处理'
-            max_page = 40
-        # 获取下一页信息
-        link_next = response.xpath(u'//a[contains(text(),"下一页")]/@href').extract_first()
-        # 获取显示页码数
-        page = re.search(re.compile('(?<=pg=)\d{1,2}'),link).group(0)
-        if int(page) <= max_page and link_next:
-            url_next = 'http://www.lawxp.com/case/' + link_next
-            print '准备采集第-----------%s页---------------'%(page)
-            yield Request(url=url_next,
-                          meta={'data': response.meta['data']},
-                          callback=self.parse,
-                          )
-        else:
-            print '已达到页码上限或者完成采集'
 
     def parseDetail(self,response):
         """解析详细信息"""
@@ -129,9 +150,11 @@ class LawxpSpider(scrapy.Spider):
         judgment = response.xpath('//div[@id="rong_ziId"]').extract_first()
         """清理数据"""
         title = title.replace('_汇法网（lawxp.com）','') # 去除标题无效数据
-
+        url = response.url
+        id = getSignName(url)
         formdata = {
-            'url':response.url,
+            'url':url,
+            'id':id,
             'title':title,
                'types':types,
                'court':court,
@@ -161,8 +184,16 @@ class LawxpSpider(scrapy.Spider):
         print 'csrf_token:', csrf_token
         formdata = response.meta['formdata']
         formdata['csrf_token'] = csrf_token
-        yield FormRequest.from_response(response, formdata=formdata)
+        yield FormRequest.from_response(response,
+                                        formdata=formdata,
+                                        meta={'formdata':formdata},
+                                        callback=self.afterpost,
+                                        )
 
+    def afterpost(self,response):
+        """测试post数据问题"""
+        formdata=response.meta['formdata']
+        yield formdata
 
 
 
