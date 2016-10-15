@@ -5,7 +5,7 @@ import hashlib
 from scrapy.spider import CrawlSpider,Rule,Spider
 from scrapy.linkextractor import LinkExtractor
 from scrapy.selector import Selector
-from scrapy import Request
+from scrapy import Request,FormRequest
 
 
 class UniformSpider(CrawlSpider):
@@ -149,12 +149,25 @@ class UniformSpider(CrawlSpider):
 
     def post_to_server(self,response):
         """post方式上传到服务器"""
+        csrf_token = Selector(response=response).xpath('//input[@id="csrf_token"]/@value').extract_first()
+        formdata = response.meta['formdata']
+        formdata['csrf_token'] = csrf_token
+        formdata['submit'] = 'submit'
+        # 处理None
+        for key in formdata:
+            if formdata[key] is None:
+                formdata[key] = ''
+        yield FormRequest.from_response(response=response,
+                                        formdata=formdata,
+                                        meta={'dont_cache':True,
+                                              'formdata':formdata},
+                                        callback=self.after_post)
 
 
 
     def after_post(self,response):
         """返回item,切断response回路"""
-
+        yield response.meta['formdata']
 
 
     def getSignName(self,string):
