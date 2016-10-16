@@ -107,23 +107,26 @@ class UniformSpider(CrawlSpider):
     def parse_detail(self,response):
         """解析详细页面"""
         title = response.xpath('/html/head/title/text()').re(u'.*(?=_汇法网)')[0] # 标题,去除'_汇法网'标记
-        court = response.xpath(
-            '//div[@id="court_history"]/div/span/strong/text()').extract_first()  # 法院名称
-
+        court = response.xpath('//div[@class="zx_lin"]/a[3]/text()').extract_first()  # 法院名称
         judgment = response.xpath('//div[@id="rong_ziId"]/p').extract() # 审判书正文
         types = response.xpath('//div[@class="mylnr-jianjie"]/ul/li[2]/span[1]/a/text()').extract()
-
-        location = response.xpath('//div[@class="zx_lin"]/a[3]/text()').re(u'.*(?=人民法院)')[0] # 区域
         data = response.xpath('////li[@class="mylnr-jj1"]/span/text()').extract()
 
         # 数据整理
+        title = title.replace(' ','') # 标题去空格
         trial_person = data[-1].replace('审理人员：','').replace(' ','') # 审理人员,去除空格
         proceeding = data[-2].replace('审理程序：','') # 审理程序,去除无效数据
         conclusion_date = data[-3].replace('审结日期：','') # 审结日期
         document_type = data[-4].replace('文书类型：','') # 文书类型
         document_code = data[-5].replace('文书字号：','') # 文书字号
 
-
+        # 获取区域,仅支持中级人民法院,高级人民法院
+        location = re.search(re.compile(u'.*(?=中级人民法院)'),court)
+        if location:
+            location = location.group(0)
+        else:
+            location = re.search(re.compile(u'.*(?=人民法院)'),court)
+            location = location.group(0)
         type_string = '>>'.join(str(i) for i in types) # 转换为str后连接
         judgment = '\n'.join(str(i) for i in judgment) # 转换为str后连接
         url = response.url
@@ -138,7 +141,7 @@ class UniformSpider(CrawlSpider):
         item['url_source'] = url
         item['title'] = title
         item['location'] = location
-        item['types'] = types
+        item['types'] = type_string
         item['court'] = court
         item['document_code'] = document_code
         item['document_type'] = document_type
@@ -146,7 +149,7 @@ class UniformSpider(CrawlSpider):
         item['proceeding'] = proceeding
         item['trial_person'] = trial_person
         item['judgment'] = judgment
-        item['crawl_time'] = crawl_time
+        item['crawl_time'] = str(crawl_time)
         yield item
 
     def getSignName(self,string):
