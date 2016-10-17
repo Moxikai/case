@@ -127,7 +127,16 @@ class UniformSpider(CrawlSpider):
         else:
             location = re.search(re.compile(u'.*(?=人民法院)'),court)
             location = location.group(0)
-        type_string = '>>'.join(str(i) for i in types) # 转换为str后连接
+        # 定罪类型，针对多个定罪类型
+        length = len(types)
+        count = length/4
+        result_string = ''
+        for i in range(count):
+            list_split=types[i*4:(i+1)*4]
+            type_string = '>>'.join(str(j) for j in list_split) # 列表转字符串
+            result_string = (result_string+'\n'+type_string) if result_string else type_string
+
+        #type_string = '>>'.join(str(i) for i in types) # 转换为str后连接
         judgment = '\n'.join(str(i) for i in judgment) # 转换为str后连接
         url = response.url
         id = self.getSignName(url)
@@ -141,7 +150,7 @@ class UniformSpider(CrawlSpider):
         item['url_source'] = url
         item['title'] = title
         item['location'] = location
-        item['types'] = type_string
+        item['types'] = result_string
         item['court'] = court
         item['document_code'] = document_code
         item['document_type'] = document_type
